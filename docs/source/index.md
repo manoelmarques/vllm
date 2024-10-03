@@ -112,6 +112,7 @@ serving/metrics
 serving/engine_args
 serving/env_vars
 serving/usage_stats
+serving/weights_loading_with_fastsafetensor
 serving/integrations/index
 :::
 
