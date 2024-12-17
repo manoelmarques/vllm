@@ -6,6 +6,7 @@ from vllm.executor.executor_base import ExecutorAsyncBase, ExecutorBase
 from vllm.executor.multiproc_worker_utils import (ProcessWorkerWrapper,
                                                   ResultHandler, WorkerMonitor)
 from vllm.logger import init_logger
+from vllm.logging_utils import timelog
 from vllm.lora.request import LoRARequest
 from vllm.model_executor.layers.sampler import SamplerOutput
 from vllm.prompt_adapter.request import PromptAdapterRequest
@@ -20,6 +21,7 @@ class CPUExecutor(ExecutorBase):
 
     uses_ray: bool = False
 
+    @timelog(log=logger)
     def _init_executor(self) -> None:
         assert self.device_config.device_type == "cpu"
         # Reminder: Please update docs/source/usage/compatibility_matrix.rst
@@ -106,6 +108,7 @@ class CPUExecutor(ExecutorBase):
         self._run_workers("init_device")
         self._run_workers("load_model")
 
+    @timelog(log=logger)
     def _create_worker(
         self,
         local_rank: int = 0,
@@ -128,6 +131,7 @@ class CPUExecutor(ExecutorBase):
 
         return wrapper.worker
 
+    @timelog(log=logger)
     def _run_workers(
         self,
         method: str,
@@ -173,6 +177,7 @@ class CPUExecutor(ExecutorBase):
         return self.driver_method_invoker(self.driver_worker,
                                           "determine_num_available_blocks")
 
+    @timelog(log=logger)
     def initialize_cache(self, num_gpu_blocks: int,
                          num_cpu_blocks: int) -> None:
         """Initialize the KV cache by invoking the underlying worker.
@@ -189,6 +194,7 @@ class CPUExecutor(ExecutorBase):
                           num_gpu_blocks=num_gpu_blocks,
                           num_cpu_blocks=num_cpu_blocks)
 
+    @timelog(log=logger)
     def execute_model(
             self,
             execute_model_req: ExecuteModelRequest) -> List[SamplerOutput]:

@@ -18,6 +18,7 @@ from mistral_common.tokens.tokenizers.tekken import (SpecialTokenPolicy,
                                                      Tekkenizer)
 
 from vllm.logger import init_logger
+from vllm.logging_utils import timelog
 
 if TYPE_CHECKING:
     from vllm.entrypoints.chat_utils import ChatCompletionMessageParam
@@ -154,6 +155,7 @@ class MistralTokenizer:
         return cls(mistral_tokenizer)
 
     @staticmethod
+    @timelog(log=logger)
     def _download_mistral_tokenizer_from_hf(tokenizer_name: str,
                                             revision: Optional[str]) -> str:
         try:
