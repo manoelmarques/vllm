@@ -1,0 +1,6 @@
+services:
+  vllm:
+    image: vllm-cpu-env
+    build:
+      context: .
+      dockerfile: ./Dockerfile.arm
