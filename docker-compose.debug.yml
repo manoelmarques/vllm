@@ -1,0 +1,20 @@
+services:
+  vllm:
+    image: vllm-cpu-env
+    ipc: host
+    volumes:
+      - ~/.cache/huggingface:/root/.cache/huggingface
+    build:
+      context: .
+      dockerfile: ./Dockerfile.arm
+      shm_size: 4gb
+    entrypoint: /bin/sh
+    tty: true
+    command:
+    - "-c"
+    - |
+        pip install --root-user-action=ignore debugpy
+        python3 -m debugpy --configure-subProcess True --wait-for-client --listen 0.0.0.0:5678 /workspace/vllm/vllm/entrypoints/openai/api_server.py --model Qwen/Qwen2.5-0.5B-Instruct --dtype float16
+    ports:
+      - 8000:8000
+      - 5678:5678
