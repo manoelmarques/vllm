@@ -12,6 +12,7 @@ from vllm.config import (ObservabilityConfig, VllmConfig,
                          set_current_vllm_config)
 from vllm.distributed import broadcast_tensor_dict, get_pp_group, get_tp_group
 from vllm.logger import init_logger
+from vllm.logging_utils import timelog
 from vllm.lora.request import LoRARequest
 from vllm.model_executor.layers.sampler import SamplerOutput
 from vllm.sequence import ExecuteModelRequest, IntermediateTensors
@@ -531,6 +532,7 @@ class WorkerWrapperBase:
             del os.environ[key]
         update_environment_variables(envs)
 
+    @timelog(log=logger)
     def init_worker(self, all_kwargs: List[Dict[str, Any]]) -> None:
         """
         Here we inject some common logic before initializing the worker.

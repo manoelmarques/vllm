@@ -20,6 +20,7 @@ from tqdm.auto import tqdm
 from vllm.config import LoadConfig, ModelConfig
 from vllm.distributed import get_tensor_model_parallel_rank
 from vllm.logger import init_logger
+from vllm.logging_utils import timelog
 from vllm.model_executor.layers.quantization import (QuantizationConfig,
                                                      get_quantization_config)
 from vllm.platforms import current_platform
@@ -212,6 +213,7 @@ def get_quant_config(model_config: ModelConfig,
     return quant_cls.from_config(config)
 
 
+@timelog(log=logger)
 def download_weights_from_hf(
     model_name_or_path: str,
     cache_dir: Optional[str],
@@ -401,7 +403,7 @@ def np_cache_weights_iterator(
             param = np.load(f)
         yield name, torch.from_numpy(param)
 
-
+@timelog(log=logger)
 def safetensors_weights_iterator(
     hf_weights_files: List[str]
 ) -> Generator[Tuple[str, torch.Tensor], None, None]:
@@ -435,10 +437,12 @@ def runai_safetensors_weights_iterator(
         ):
             streamer.stream_file(st_file)
             yield from streamer.get_tensors()
+
+@timelog(log=logger)
 def fastsafetensors_weights_iterator(
     hf_weights_files: List[str]
 ) -> Generator[Tuple[str, torch.Tensor], None, None]:
-    """Iterate over the weights in the model safetensor files 
+    """Iterate over the weights in the model safetensor files
     using fastsafetensor library."""
     # pylint: disable=import-error
     from fastsafetensors import SafeTensorsFileLoader, SingleGroup # type: ignore

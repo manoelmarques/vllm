@@ -1,0 +1,30 @@
+{
+    "configurations": [
+        {
+            "name": "Python Debugger: Remote Attach",
+            "type": "debugpy",
+            "request": "attach",
+            "connect": {
+                "host": "localhost",
+                "port": 5678
+            },
+            "subProcess": true,
+            "pathMappings": [
+                {
+                    "localRoot": "${workspaceFolder}",
+                    "remoteRoot": "/workspace/vllm"
+                }
+            ]
+        },
+        {
+            "name": "Python Debugger: Run Server",
+            "type": "debugpy",
+            "request": "launch",
+            "env": {"VLLM_RPC_TIMEOUT":"1800000"},
+            "python": "${command:python.interpreterPath}",
+            "module": "vllm.entrypoints.openai.api_server",
+            "args": ["--model","Qwen/Qwen2.5-0.5B-Instruct", "--dtype","float16"],
+            "subProcess": true,
+        }
+    ]
+}
