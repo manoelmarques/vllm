@@ -28,6 +28,9 @@ RUN echo 'tzdata tzdata/Areas select America' | debconf-set-selections \
     && curl -sS https://bootstrap.pypa.io/get-pip.py | python${PYTHON_VERSION} \
     && python3 --version && python3 -m pip --version
 
+# Install fastsafetensor build dependencies
+RUN apt-get install -y libnuma-dev
+
 # Upgrade to GCC 10 to avoid https://gcc.gnu.org/bugzilla/show_bug.cgi?id=92519
 # as it was causing spam when compiling the CUTLASS kernels
 RUN apt-get install -y gcc-10 g++-10
@@ -174,6 +177,9 @@ RUN echo 'tzdata tzdata/Areas select America' | debconf-set-selections \
     && ln -sf /usr/bin/python${PYTHON_VERSION}-config /usr/bin/python3-config \
     && curl -sS https://bootstrap.pypa.io/get-pip.py | python${PYTHON_VERSION} \
     && python3 --version && python3 -m pip --version
+
+# Install fastsafetensor build dependencies
+RUN apt-get install -y libnuma-dev
 
 # Workaround for https://github.com/openai/triton/issues/2507 and
 # https://github.com/pytorch/pytorch/issues/107960 -- hopefully

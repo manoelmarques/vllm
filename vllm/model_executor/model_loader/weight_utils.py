@@ -444,9 +444,9 @@ def runai_safetensors_weights_iterator(
             streamer.stream_file(st_file)
             yield from streamer.get_tensors()
 def fastsafetensors_weights_iterator(
-    hf_weights_files: List[str]
+    hf_weights_files: List[str],nogds: bool, fastsafe_debug: bool
 ) -> Generator[Tuple[str, torch.Tensor], None, None]:
-    """Iterate over the weights in the model safetensor files 
+    """Iterate over the weights in the model safetensor files
     using fastsafetensor library."""
     # pylint: disable=import-error
     from fastsafetensors import SafeTensorsFileLoader, SingleGroup # type: ignore
@@ -461,7 +461,7 @@ def fastsafetensors_weights_iterator(
     ]
 
     for f_list in weight_files_sub_lists:
-        loader = SafeTensorsFileLoader(pg, device)
+        loader = SafeTensorsFileLoader(pg, device, nogds=nogds, debug_log=fastsafe_debug)
         rank_file_map = {i: [f] for i, f in enumerate(f_list)}
         loader.add_filenames(rank_file_map)
         fb = loader.copy_files_to_device()
