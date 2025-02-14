@@ -353,8 +353,13 @@ class DefaultModelLoader(BaseModelLoader):
                                             'False').lower() == 'true'
             if use_fastsafe_tensor:
                 logger.info("Using fastsafetensor for loading weights")
+                nogds = os.getenv('FASTSAFETENSOR_NOGDS',
+                                    'False').lower() == 'true'
+                fastsafe_debug = os.getenv('FASTSAFETENSOR_DEBUG',
+                                    'False').lower() == 'true'
+                logger.info("fastsafetensor options nogds %s, debug %s",nogds,fastsafe_debug)
                 weights_iterator = fastsafetensors_weights_iterator(
-                    hf_weights_files)
+                    hf_weights_files, nogds, fastsafe_debug)
             else:
                 weights_iterator = safetensors_weights_iterator(
                     hf_weights_files)
