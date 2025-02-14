@@ -30,6 +30,9 @@ ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 # Reference: https://github.com/astral-sh/uv/pull/1694
 ENV UV_HTTP_TIMEOUT=500
 
+# Install fastsafetensor build dependencies
+RUN apt-get install -y libnuma-dev
+
 # Upgrade to GCC 10 to avoid https://gcc.gnu.org/bugzilla/show_bug.cgi?id=92519
 # as it was causing spam when compiling the CUTLASS kernels
 RUN apt-get install -y gcc-10 g++-10
@@ -187,6 +190,9 @@ ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 # This timeout (in seconds) is necessary when installing some dependencies via uv since it's likely to time out
 # Reference: https://github.com/astral-sh/uv/pull/1694
 ENV UV_HTTP_TIMEOUT=500
+
+# Install fastsafetensor build dependencies
+RUN apt-get install -y libnuma-dev
 
 # Workaround for https://github.com/openai/triton/issues/2507 and
 # https://github.com/pytorch/pytorch/issues/107960 -- hopefully
