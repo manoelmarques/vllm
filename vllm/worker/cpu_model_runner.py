@@ -14,6 +14,7 @@ from vllm.attention import AttentionMetadata, get_attn_backend
 from vllm.config import VllmConfig
 from vllm.forward_context import set_forward_context
 from vllm.logger import init_logger
+from vllm.logging_utils import timelog
 from vllm.lora.layers import LoRAMapping
 from vllm.lora.request import LoRARequest
 from vllm.lora.worker_manager import LRUCacheWorkerLoRAManager
@@ -437,6 +438,7 @@ class CPUModelRunnerBase(ModelRunnerBase[TModelInputForCPU]):
     _builder_cls: Type[ModelInputForCPUBuilder]
     builder: ModelInputForCPUBuilder
 
+    #@timelog
     def __init__(
         self,
         vllm_config: VllmConfig,
@@ -486,6 +488,7 @@ class CPUModelRunnerBase(ModelRunnerBase[TModelInputForCPU]):
             # multi-step model runner does not have `_builder_cls`
             self.builder = self._builder_cls(weakref.proxy(self))
 
+    @timelog
     def load_model(self) -> None:
         self.model = get_model(vllm_config=self.vllm_config)
 

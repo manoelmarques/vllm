@@ -35,6 +35,7 @@ from vllm.config import DeviceConfig, VllmConfig
 from vllm.distributed.parallel_state import get_world_group
 from vllm.forward_context import set_forward_context
 from vllm.logger import init_logger
+from vllm.logging_utils import timelog
 from vllm.lora.layers import LoRAMapping
 from vllm.lora.request import LoRARequest
 from vllm.lora.worker_manager import LRUCacheWorkerLoRAManager
@@ -127,7 +128,7 @@ def warmup_range(config: Tuple[int, int, int]):
     """Generate a warmup range.
 
     Start from bmin and multiply by 2 until you reach bstep.
-    Then, increase the values in the range by the value of bstep until you 
+    Then, increase the values in the range by the value of bstep until you
     reach bmax.
 
     Example:
@@ -636,6 +637,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.skip_warmup = os.environ.get('VLLM_SKIP_WARMUP',
                                           'false').lower() == 'true'
 
+    @timelog
     def load_model(self) -> None:
         import habana_frameworks.torch.core as htcore
         if self.model_config.quantization == 'inc' or \
@@ -1876,7 +1878,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         This is a helper function to create the mask for lora computations.
         Lora Mask is needed to ensure we match the correct lora weights for the
         for the request.
-        For Prompt phase we have 
+        For Prompt phase we have
         lora_mask with shape (batch_size * seq_len, max_loras * max_rank)
         lora_logits_mask with shape (batch_size, max_loras * max_rank)
         For Decode phase we have both
