@@ -12,6 +12,7 @@ from huggingface_hub import HfApi, hf_hub_download
 from vllm.logger import init_logger
 from vllm.transformers_utils.tokenizer_base import TokenizerBase
 from vllm.utils import is_list_of
+from vllm.logging_utils import timelog
 
 if TYPE_CHECKING:
     # make sure `mistral_common` is lazy imported,
@@ -228,6 +229,7 @@ class MistralTokenizer(TokenizerBase):
         return cls(mistral_tokenizer)
 
     @staticmethod
+    #@timelog
     def _download_mistral_tokenizer_from_hf(tokenizer_name: str,
                                             revision: Optional[str]) -> str:
         try:
