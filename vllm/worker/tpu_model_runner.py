@@ -17,6 +17,7 @@ from vllm.attention import AttentionMetadata, get_attn_backend
 from vllm.config import VllmConfig
 from vllm.forward_context import get_forward_context, set_forward_context
 from vllm.logger import init_logger
+from vllm.logging_utils import timelog
 from vllm.model_executor.layers.sampler import SamplerOutput
 from vllm.model_executor.model_loader import get_model
 from vllm.model_executor.sampling_metadata import SamplingMetadata
@@ -134,6 +135,7 @@ class TPUModelRunner(ModelRunnerBase[ModelInputForTPU]):
                 self.model_config.max_model_len /
                 (block_table_size / smem_size))
 
+    @timelog
     def load_model(self) -> None:
         self.device = self.device_config.device
 
