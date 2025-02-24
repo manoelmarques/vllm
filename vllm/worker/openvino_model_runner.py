@@ -12,6 +12,7 @@ from vllm.attention.backends.openvino import OpenVINOAttentionMetadata
 from vllm.config import VllmConfig
 from vllm.forward_context import set_forward_context
 from vllm.logger import init_logger
+from vllm.logging_utils import timelog
 from vllm.model_executor import SamplingMetadata
 from vllm.model_executor.layers.sampler import SamplerOutput
 from vllm.model_executor.model_loader.openvino import get_model
@@ -78,6 +79,7 @@ class OpenVINOModelRunner(ModelRunnerBase):
         # Lazy initialization.
         self.model: nn.Module  # Set after init_Model
 
+    @timelog
     def load_model(self) -> None:
         self.model = get_model(vllm_config=self.vllm_config,
                                kv_cache_dtype=self.kv_cache_dtype,

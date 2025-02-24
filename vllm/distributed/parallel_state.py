@@ -43,6 +43,7 @@ from vllm.distributed.device_communicators.base_device_communicator import (
     DeviceCommunicatorBase)
 from vllm.distributed.utils import StatelessProcessGroup
 from vllm.logger import init_logger
+from vllm.logging_utils import timelog
 from vllm.utils import (direct_register_custom_op, resolve_obj_by_qualname,
                         supports_custom_op)
 
@@ -256,6 +257,7 @@ class GroupCoordinator:
         return self.ranks[(rank_in_group - 1) % world_size]
 
     @contextmanager
+    @timelog
     def graph_capture(
             self, graph_capture_context: Optional[GraphCaptureContext] = None):
         if graph_capture_context is None:

@@ -10,6 +10,7 @@ import torch
 
 from vllm.distributed import get_pp_group
 from vllm.logger import init_logger
+from vllm.logging_utils import timelog
 from vllm.model_executor.layers.sampler import (PromptLogprobs, SampleLogprobs,
                                                 SamplerOutput,
                                                 SamplingMetadata, get_logprobs,
@@ -465,7 +466,7 @@ class MultiStepModelRunner(GPUModelRunnerBase[StatefulModelInput]):
         intermediate_tensors: Optional[IntermediateTensors] = None,
         num_steps: int = 1,
     ) -> Optional[Union[List[SamplerOutput], IntermediateTensors]]:
-        """ 
+        """
         Execute the model for a single step and update multi-step
         metadata
         """
@@ -648,6 +649,7 @@ class MultiStepModelRunner(GPUModelRunnerBase[StatefulModelInput]):
 
         return model_input
 
+    @timelog
     def load_model(self) -> None:
         self._base_model_runner.load_model()
         self.model_memory_usage = self._base_model_runner.model_memory_usage
@@ -693,14 +695,14 @@ def deferred_pythonize_logprobs(
     1. Pythonize GPU-side sampler result tensors into CPU-side sampler result.
     2. Pythonize GPU-side logprobs tensor into CPU-side logprobs lists,
        utilizing  the Pythonized sampler result computed in step 1.
-    
+
     These deferred computations are not required for single-step scheduling
     or the `profile_run()` phase of multi-step scheduling.
 
     Args:
         output: sampler output (under deferred Pythonization)
         sampling_metadata
-        
+
     Returns:
         prompt_logprobs (CPU), sample_logprobs (CPU)
     """
@@ -733,10 +735,10 @@ def _pythonize_sampler_output(
     logprobs_tensor: Optional[torch.Tensor],
     cache: Optional[PythonizationCache],
 ) -> None:
-    """ This function is only called when the output tensors are ready. 
-    See :class:`ModelOutput`. 
-    
-    Modifies `output.outputs` and `pinned_sampled_token_buffer` in-place, 
+    """ This function is only called when the output tensors are ready.
+    See :class:`ModelOutput`.
+
+    Modifies `output.outputs` and `pinned_sampled_token_buffer` in-place,
     adding a Pythonized output data structure
     (:class:`CompletionSequenceGroupOutput`) for each :class:`SequenceGroup`.
 
@@ -747,7 +749,7 @@ def _pythonize_sampler_output(
                                          (receives copy of
                                          GPU-side token buffer.)
       sampled_token_ids: GPU-side token buffer
-      logprobs_tensor: GPU-side tensor containing 
+      logprobs_tensor: GPU-side tensor containing
                        logprobs computed during sampling
     """
 
