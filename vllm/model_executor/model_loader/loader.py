@@ -33,6 +33,7 @@ from vllm.distributed import (get_tensor_model_parallel_rank,
                               get_tensor_model_parallel_world_size)
 from vllm.envs import VLLM_USE_MODELSCOPE
 from vllm.logger import init_logger
+from vllm.logging_utils import timelog
 from vllm.model_executor.layers.linear import (LinearBase,
                                                MergedColumnParallelLinear,
                                                QKVParallelLinear,
@@ -195,7 +196,6 @@ class BaseModelLoader(ABC):
         """Load a model with the given configurations."""
         raise NotImplementedError
 
-
 class DefaultModelLoader(BaseModelLoader):
     """Model loader that can load different file types from disk."""
 
@@ -221,12 +221,14 @@ class DefaultModelLoader(BaseModelLoader):
     counter_before_loading_weights: float = 0.0
     counter_after_loading_weights: float = 0.0
 
+    @timelog
     def __init__(self, load_config: LoadConfig):
         super().__init__(load_config)
         if load_config.model_loader_extra_config:
             raise ValueError(f"Model loader extra config is not supported for "
                              f"load format {load_config.load_format}")
 
+    @timelog
     def _maybe_download_from_modelscope(
             self, model: str, revision: Optional[str]) -> Optional[str]:
         """Download model from ModelScope hub if VLLM_USE_MODELSCOPE is True.
@@ -256,6 +258,7 @@ class DefaultModelLoader(BaseModelLoader):
             return model_path
         return None
 
+    @timelog
     def _prepare_weights(
         self,
         model_name_or_path: str,
@@ -340,6 +343,7 @@ class DefaultModelLoader(BaseModelLoader):
 
         return hf_folder, hf_weights_files, use_safetensors
 
+    @timelog
     def _get_weights_iterator(
             self, source: "Source"
     ) -> Generator[Tuple[str, torch.Tensor], None, None]:
@@ -392,6 +396,7 @@ class DefaultModelLoader(BaseModelLoader):
         return ((source.prefix + name, tensor)
                 for (name, tensor) in weights_iterator)
 
+    @timelog
     def _get_all_weights(
         self,
         model_config: ModelConfig,
@@ -415,12 +420,14 @@ class DefaultModelLoader(BaseModelLoader):
         for source in secondary_weights:
             yield from self._get_weights_iterator(source)
 
+    @timelog
     def download_model(self, model_config: ModelConfig) -> None:
         self._prepare_weights(model_config.model,
                               model_config.revision,
                               fall_back_to_pt=True,
                               allow_patterns_overrides=None)
 
+    @timelog
     def load_model(self, vllm_config: VllmConfig) -> nn.Module:
         device_config = vllm_config.device_config
         model_config = vllm_config.model_config
@@ -454,15 +461,18 @@ class DefaultModelLoader(BaseModelLoader):
 class DummyModelLoader(BaseModelLoader):
     """Model loader that will set model weights to random values."""
 
+    @timelog
     def __init__(self, load_config: LoadConfig):
         super().__init__(load_config)
         if load_config.model_loader_extra_config:
             raise ValueError(f"Model loader extra config is not supported for "
                              f"load format {load_config.load_format}")
 
+    @timelog
     def download_model(self, model_config: ModelConfig) -> None:
         pass  # Nothing to download
 
+    @timelog
     def load_model(self, vllm_config: VllmConfig) -> nn.Module:
         device_config = vllm_config.device_config
         model_config = vllm_config.model_config
@@ -481,6 +491,7 @@ class DummyModelLoader(BaseModelLoader):
 class TensorizerLoader(BaseModelLoader):
     """Model loader using CoreWeave's tensorizer library."""
 
+    @timelog
     def __init__(self, load_config: LoadConfig):
         super().__init__(load_config)
         if isinstance(load_config.model_loader_extra_config, TensorizerConfig):
@@ -545,12 +556,14 @@ class TensorizerLoader(BaseModelLoader):
                                              vllm_config=vllm_config)
         return model.eval()
 
+    @timelog
     def download_model(self, model_config: ModelConfig) -> None:
         self.tensorizer_config.verify_with_model_config(model_config)
 
         with self.tensorizer_config.open_stream():
             pass
 
+    @timelog
     def load_model(self, vllm_config: VllmConfig) -> nn.Module:
         model_config = vllm_config.model_config
         parallel_config = vllm_config.parallel_config
@@ -589,6 +602,7 @@ class ShardedStateLoader(BaseModelLoader):
 
     DEFAULT_PATTERN = "model-rank-{rank}-part-{part}.safetensors"
 
+    @timelog
     def __init__(self, load_config: LoadConfig):
         super().__init__(load_config)
         extra_config = ({} if load_config.model_loader_extra_config is None
@@ -649,9 +663,11 @@ class ShardedStateLoader(BaseModelLoader):
                 ignore_patterns=self.load_config.ignore_patterns,
             )
 
+    @timelog
     def download_model(self, model_config: ModelConfig) -> None:
         self._prepare_weights(model_config.model, model_config.revision)
 
+    @timelog
     def load_model(self, vllm_config: VllmConfig) -> nn.Module:
         device_config = vllm_config.device_config
         model_config = vllm_config.model_config
@@ -751,6 +767,7 @@ class BitsAndBytesModelLoader(BaseModelLoader):
 
     possible_config_file_names = ["adapter_config.json"]
 
+    @timelog
     def __init__(self, load_config: LoadConfig):
         super().__init__(load_config)
 
@@ -1229,9 +1246,11 @@ class BitsAndBytesModelLoader(BaseModelLoader):
                     set_weight_attrs(
                         param, {"matmul_state": [None] * len(quant_states)})
 
+    @timelog
     def download_model(self, model_config: ModelConfig) -> None:
         self._prepare_weights(model_config.model, model_config.revision)
 
+    @timelog
     def load_model(self, vllm_config: VllmConfig) -> nn.Module:
         device_config = vllm_config.device_config
         model_config = vllm_config.model_config
@@ -1251,6 +1270,7 @@ class GGUFModelLoader(BaseModelLoader):
     supports loading both full models and sharded models.
     """
 
+    @timelog
     def __init__(self, load_config: LoadConfig):
         super().__init__(load_config)
         if load_config.model_loader_extra_config:
@@ -1318,9 +1338,11 @@ class GGUFModelLoader(BaseModelLoader):
         return gguf_quant_weights_iterator(model_name_or_path,
                                            gguf_to_hf_name_map)
 
+    @timelog
     def download_model(self, model_config: ModelConfig) -> None:
         self._prepare_weights(model_config.model)
 
+    @timelog
     def load_model(self, vllm_config: VllmConfig) -> nn.Module:
         device_config = vllm_config.device_config
         model_config = vllm_config.model_config
@@ -1416,6 +1438,7 @@ class RunaiModelStreamerLoader(BaseModelLoader):
         """Download model if necessary"""
         self._prepare_weights(model_config.model, model_config.revision)
 
+    @timelog
     def load_model(self, vllm_config: VllmConfig) -> nn.Module:
         """Perform streaming of the model to destination"""
         device_config = vllm_config.device_config

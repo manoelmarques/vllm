@@ -23,6 +23,7 @@ from tqdm.auto import tqdm
 from vllm.config import LoadConfig, ModelConfig
 from vllm.distributed import get_tensor_model_parallel_rank
 from vllm.logger import init_logger
+from vllm.logging_utils import timelog
 from vllm.model_executor.layers.quantization import (QuantizationConfig,
                                                      get_quantization_config)
 from vllm.platforms import current_platform
@@ -217,6 +218,7 @@ def get_quant_config(model_config: ModelConfig,
     return quant_cls.from_config(config)
 
 
+@timelog
 def download_weights_from_hf(
     model_name_or_path: str,
     cache_dir: Optional[str],
@@ -274,7 +276,7 @@ def download_weights_from_hf(
                         model_name_or_path, time_taken)
     return hf_folder
 
-
+@timelog
 def download_safetensors_index_file_from_hf(
     model_name_or_path: str,
     index_file: str,
@@ -314,6 +316,7 @@ def download_safetensors_index_file_from_hf(
 # Passing both of these to the weight loader functionality breaks.
 # So, we use the index_file to
 # look up which safetensors files should be used.
+@timelog
 def filter_duplicate_safetensors_files(hf_weights_files: List[str],
                                        hf_folder: str,
                                        index_file: str) -> List[str]:
@@ -337,7 +340,7 @@ def filter_duplicate_safetensors_files(hf_weights_files: List[str],
     ]
     return hf_weights_files
 
-
+@timelog
 def filter_files_not_needed_for_inference(
         hf_weights_files: List[str]) -> List[str]:
     """
@@ -365,7 +368,7 @@ def filter_files_not_needed_for_inference(
 # each line of output with some prefix.
 _BAR_FORMAT = "{desc}: {percentage:3.0f}% Completed | {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]\n"  # noqa: E501
 
-
+@timelog
 def np_cache_weights_iterator(
     model_name_or_path: str, cache_dir: Optional[str], hf_folder: str,
     hf_weights_files: List[str]
@@ -412,7 +415,7 @@ def np_cache_weights_iterator(
             param = np.load(f)
         yield name, torch.from_numpy(param)
 
-
+@timelog
 def safetensors_weights_iterator(
     hf_weights_files: List[str]
 ) -> Generator[Tuple[str, torch.Tensor], None, None]:
@@ -430,7 +433,7 @@ def safetensors_weights_iterator(
                 param = f.get_tensor(name)
                 yield name, param
 
-
+@timelog
 def runai_safetensors_weights_iterator(
     hf_weights_files: List[str]
 ) -> Generator[Tuple[str, torch.Tensor], None, None]:
@@ -446,6 +449,8 @@ def runai_safetensors_weights_iterator(
         ):
             streamer.stream_file(st_file)
             yield from streamer.get_tensors()
+
+@timelog
 def fastsafetensors_weights_iterator(
     hf_weights_files: List[str],nogds: bool, fastsafe_debug: bool
 ) -> Generator[Tuple[str, torch.Tensor], None, None]:
@@ -475,7 +480,7 @@ def fastsafetensors_weights_iterator(
         fb.close()
         loader.close()
 
-
+@timelog
 def pt_weights_iterator(
     hf_weights_files: List[str]
 ) -> Generator[Tuple[str, torch.Tensor], None, None]:
@@ -492,7 +497,7 @@ def pt_weights_iterator(
         yield from state.items()
         del state
 
-
+@timelog
 def get_gguf_extra_tensor_names(
         gguf_file: str, gguf_to_hf_name_map: Dict[str, str]) -> List[str]:
     reader = gguf.GGUFReader(gguf_file)
@@ -501,7 +506,7 @@ def get_gguf_extra_tensor_names(
     extra_keys = expected_gguf_keys - exact_gguf_keys
     return [gguf_to_hf_name_map[key] for key in extra_keys]
 
-
+@timelog
 def gguf_quant_weights_iterator(
     gguf_file: str, gguf_to_hf_name_map: Dict[str, str]
 ) -> Generator[Tuple[str, torch.Tensor], None, None]:
@@ -532,7 +537,7 @@ def gguf_quant_weights_iterator(
             param = torch.tensor(weight)
             yield name, param
 
-
+@timelog
 def convert_pyslice_to_tensor(x: Any) -> torch.Tensor:
     """convert PySafeSlice object from safetensors to torch.Tensor
 
@@ -614,7 +619,7 @@ def composed_weight_loader(
 
     return composed_loader
 
-
+@timelog
 def initialize_dummy_weights(
     model: torch.nn.Module,
     low: float = -1e-3,
