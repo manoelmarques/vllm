@@ -29,6 +29,7 @@ from vllm.distributed.parallel_state import (get_tensor_model_parallel_rank,
 from vllm.forward_context import get_forward_context, set_forward_context
 from vllm.inputs import INPUT_REGISTRY, InputRegistry
 from vllm.logger import init_logger
+from vllm.logging_utils import timelog
 from vllm.lora.layers import LoRAMapping
 from vllm.lora.request import LoRARequest
 from vllm.lora.worker_manager import LRUCacheWorkerLoRAManager
@@ -1002,6 +1003,7 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
     _builder_cls: Type[ModelInputForGPUBuilder]
     builder: ModelInputForGPUBuilder
 
+    @timelog
     def __init__(
         self,
         vllm_config: VllmConfig,
@@ -1106,6 +1108,7 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
             # multi-step model runner does not have `_builder_cls`
             self.builder = self._builder_cls(weakref.proxy(self))
 
+    @timelog
     def load_model(self) -> None:
         logger.info("Starting to load model %s...", self.model_config.model)
         with DeviceMemoryProfiler(self.device) as m:
@@ -1167,6 +1170,7 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
     def get_model(self) -> nn.Module:
         return self.model
 
+    @timelog
     def save_sharded_state(
         self,
         path: str,
@@ -1181,6 +1185,7 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
             max_size=max_size,
         )
 
+    @timelog
     def save_tensorized_model(
         self,
         tensorizer_config: TensorizerConfig,
@@ -1425,6 +1430,7 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
         return self.prompt_adapter_manager.list_adapters()
 
     @torch.inference_mode()
+    @timelog
     def capture_model(self, kv_caches: List[List[torch.Tensor]]) -> None:
         """Cuda graph capture a model.
 
