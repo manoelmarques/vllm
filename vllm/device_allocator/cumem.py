@@ -12,9 +12,71 @@ from contextlib import contextmanager
 from typing import Any, Callable, Dict, Optional, Tuple, Union
 
 import torch
+import struct
+import time
 
 from vllm.utils import is_pin_memory_available
 
+_DTYPE = torch.uint8
+_CACHE_FILE = "binary_file.bin"
+
+def _write_tensors(tensors: list[torch.Tensor], file_path: str):
+    print(f"#### saving tensors {len(tensors)} to file {file_path}", flush=True)
+    start = time.perf_counter()
+    buffers: list[bytes] = []
+    headers = []
+    for tensor in tensors:
+        data = tensor.byte().numpy().tobytes()
+        # Pack the length as a 4-byte unsigned integer (little-endian)
+        header = struct.pack("<I", len(data))
+        headers.append(header)
+        buffers.append(data)
+
+    with open(file_path, 'wb') as binary_file:
+        for idx, header in enumerate(headers):
+            binary_file.write(header)
+            binary_file.write(buffers[idx])
+
+    elapsed = time.perf_counter() - start
+    print(f"#### saved bytes to file {file_path} in {elapsed} seconds", flush=True)
+
+def _read_tensors(file_path: str) -> list[torch.Tensor]:
+    print(f"#### reading tensors from file {file_path}", flush=True)
+    start = time.perf_counter()
+    buffers: list[bytearray] = []
+    with open(file_path, 'rb') as binary_file:
+        while True:
+            header = binary_file.read(4)
+            if not header:
+                break
+
+            if len(header) != 4:
+                raise ValueError("Incomplete header read")
+
+            data_len = struct.unpack("<I", header)[0]
+            data = binary_file.read(data_len)
+
+            if len(data) != data_len:
+                raise ValueError("Incomplete data read")
+
+            buffers.append(bytearray(data))
+
+    tensors = []
+    for buffer in buffers:
+        tensors.append(torch.frombuffer(buffer, dtype=_DTYPE))
+
+    elapsed = time.perf_counter() - start
+    print(f"#### read bytes and recreated tensors {len(tensors)} from file {file_path} in {elapsed} seconds", flush=True)
+
+    return tensors
+
+def _validate_tensors(old_tensors: list[torch.Tensor], new_tensors: list[torch.Tensor]) -> None:
+    if len(old_tensors) != len(new_tensors):
+        raise RuntimeError(f"Initial tensors size {len(old_tensors)} different from result tensors {len(new_tensors)}")
+
+    for idx,tensor in enumerate(old_tensors):
+        if not torch.equal(tensor,new_tensors[idx]):
+            raise RuntimeError(f"Initial tensor at {idx} different from result tensor")
 
 def find_loaded_library(lib_name) -> Optional[str]:
     """
@@ -168,7 +230,7 @@ class CuMemAllocator:
                                          str]] = None) -> None:
         """
         Put the allocator in sleep mode.
-        All data in the memory allocation with the specified tag will be 
+        All data in the memory allocation with the specified tag will be
         offloaded to CPU memory, and others will be discarded.
 
         :param offload_tags: The tags of the memory allocation that will be
@@ -183,6 +245,7 @@ class CuMemAllocator:
 
         assert isinstance(offload_tags, tuple)
 
+        tensors = []
         for ptr, data in self.pointer_to_data.items():
             handle = data.handle
             if data.tag in offload_tags:
@@ -195,30 +258,50 @@ class CuMemAllocator:
                 cpu_ptr = cpu_backup_tensor.data_ptr()
                 libcudart.cudaMemcpy(cpu_ptr, ptr, size_in_bytes)
                 data.cpu_backup_tensor = cpu_backup_tensor
+                if cpu_backup_tensor is not None:
+                    tensors.append(cpu_backup_tensor)
             unmap_and_release(handle)
+
+        if len(tensors) > 0:
+            _write_tensors(tensors, _CACHE_FILE)
 
     def wake_up(self):
         """
         Wake up the allocator from sleep mode.
-        All data that is previously offloaded will be loaded back to GPU 
+        All data that is previously offloaded will be loaded back to GPU
         memory, and the rest of the data will have empty memory."""
+        old_tensors = []
+        new_tensors = _read_tensors(_CACHE_FILE)
+        total_elapsed = 0.
         for ptr, data in self.pointer_to_data.items():
             handle = data.handle
             create_and_map(handle)
             if data.cpu_backup_tensor is not None:
                 cpu_backup_tensor = data.cpu_backup_tensor
                 if cpu_backup_tensor is not None:
+                    start = time.perf_counter()
                     size_in_bytes = cpu_backup_tensor.numel(
                     ) * cpu_backup_tensor.element_size()
                     cpu_ptr = cpu_backup_tensor.data_ptr()
+                    elapsed = time.perf_counter() - start
                     libcudart.cudaMemcpy(ptr, cpu_ptr, size_in_bytes)
                     data.cpu_backup_tensor = None
+                    old_tensors.append(cpu_backup_tensor)
+                    total_elapsed += elapsed
+
+        print(f"####wake_up: vllm took {total_elapsed} seconds to get the bytes from all tensors", flush=True)
+
+        try:
+            _validate_tensors(old_tensors,new_tensors)
+            print(f"#### wake_up: tensors saved on file {_CACHE_FILE} and vllm tensors match")
+        except RuntimeError as err:
+            print(err, flush=True)
 
     @contextmanager
     def use_memory_pool(self, tag: Optional[str] = None):
         """
         A context manager to use the memory pool.
-        All memory allocation created inside the context will be allocated 
+        All memory allocation created inside the context will be allocated
         in the memory pool, and has the specified tag.
 
         :param tag: The tag of the memory allocation. If None, the default tag
