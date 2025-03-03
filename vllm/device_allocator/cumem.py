@@ -12,9 +12,75 @@ from contextlib import contextmanager
 from typing import Any, Callable, Dict, Optional, Tuple, Union
 
 import torch
+import struct
+import time
+import ctypes
 
 from vllm.utils import is_pin_memory_available
 
+_DTYPE = torch.uint8
+_CACHE_FILE = "binary_file.bin"
+
+def _copy_from_cuda_to_bytes(scr_ptr: int, size_in_bytes: int) -> bytes:
+    # reserve space for 0 termination
+    dest_ptr = ctypes.create_string_buffer(size_in_bytes+1)
+    libcudart.cudaMemcpy(dest_ptr, scr_ptr, size_in_bytes)
+    # do not include 0 termination
+    return bytes(dest_ptr[:-1])
+
+def _write_bytes(bytes_list: list[bytes], file_path: str):
+    ctypes.Array
+    print(f"#### saving bytes {len(bytes_list)} to file {file_path}", flush=True)
+    start = time.perf_counter()
+    buffers: list[bytes] = []
+    headers = []
+    for data in bytes_list:
+        # Pack the length as a 4-byte unsigned integer (little-endian)
+        header = struct.pack("<I", len(data))
+        headers.append(header)
+        buffers.append(data)
+
+    with open(file_path, 'wb') as binary_file:
+        for idx, header in enumerate(headers):
+            binary_file.write(header)
+            binary_file.write(buffers[idx])
+
+    elapsed = time.perf_counter() - start
+    print(f"#### saved bytes to file {file_path} in {elapsed} seconds", flush=True)
+
+def _read_bytes(file_path: str) -> list[bytes]:
+    print(f"#### reading tensors from file {file_path}", flush=True)
+    start = time.perf_counter()
+    bytes_list: list[bytes] = []
+    with open(file_path, 'rb') as binary_file:
+        while True:
+            header = binary_file.read(4)
+            if not header:
+                break
+
+            if len(header) != 4:
+                raise ValueError("Incomplete header read")
+
+            data_len = struct.unpack("<I", header)[0]
+            data = binary_file.read(data_len)
+
+            if len(data) != data_len:
+                raise ValueError("Incomplete data read")
+
+            bytes_list.append(data)
+
+    elapsed = time.perf_counter() - start
+    print(f"#### read bytes {len(bytes_list)} from file {file_path} in {elapsed} seconds", flush=True)
+
+    return bytes_list
+
+def _validate_bytes(old_bytes: list[bytes], new_bytes: list[bytes]) -> None:
+    if len(old_bytes) != len(new_bytes):
+        raise RuntimeError(f"Initial bytes list size {len(old_bytes)} different from result bytes list {len(new_bytes)}")
+
+    for idx,data in enumerate(old_bytes):
+        if data != new_bytes[idx]:
+            raise RuntimeError(f"Initial bytes at {idx} different from result bytes")
 
 def find_loaded_library(lib_name) -> Optional[str]:
     """
@@ -168,7 +234,7 @@ class CuMemAllocator:
                                          str]] = None) -> None:
         """
         Put the allocator in sleep mode.
-        All data in the memory allocation with the specified tag will be 
+        All data in the memory allocation with the specified tag will be
         offloaded to CPU memory, and others will be discarded.
 
         :param offload_tags: The tags of the memory allocation that will be
@@ -183,6 +249,7 @@ class CuMemAllocator:
 
         assert isinstance(offload_tags, tuple)
 
+        bytes_list: list[bytes] = []
         for ptr, data in self.pointer_to_data.items():
             handle = data.handle
             if data.tag in offload_tags:
@@ -195,30 +262,49 @@ class CuMemAllocator:
                 cpu_ptr = cpu_backup_tensor.data_ptr()
                 libcudart.cudaMemcpy(cpu_ptr, ptr, size_in_bytes)
                 data.cpu_backup_tensor = cpu_backup_tensor
+                bytes_list.append(_copy_from_cuda_to_bytes(ptr, size_in_bytes))
             unmap_and_release(handle)
+
+        if len(bytes_list) > 0:
+            _write_bytes(bytes_list, _CACHE_FILE)
 
     def wake_up(self):
         """
         Wake up the allocator from sleep mode.
-        All data that is previously offloaded will be loaded back to GPU 
+        All data that is previously offloaded will be loaded back to GPU
         memory, and the rest of the data will have empty memory."""
+        old_bytes_list = []
+        new_bytes_list = _read_bytes(_CACHE_FILE)
+        total_elapsed = 0.
         for ptr, data in self.pointer_to_data.items():
             handle = data.handle
             create_and_map(handle)
             if data.cpu_backup_tensor is not None:
                 cpu_backup_tensor = data.cpu_backup_tensor
                 if cpu_backup_tensor is not None:
+                    start = time.perf_counter()
                     size_in_bytes = cpu_backup_tensor.numel(
                     ) * cpu_backup_tensor.element_size()
                     cpu_ptr = cpu_backup_tensor.data_ptr()
+                    elapsed = time.perf_counter() - start
                     libcudart.cudaMemcpy(ptr, cpu_ptr, size_in_bytes)
                     data.cpu_backup_tensor = None
+                    total_elapsed += elapsed
+                    old_bytes_list.append(cpu_backup_tensor.byte().numpy().tobytes())
+
+        print(f"####wake_up: vllm took {total_elapsed} seconds to get the bytes from all tensors", flush=True)
+
+        try:
+            _validate_bytes(old_bytes_list,new_bytes_list)
+            print(f"#### wake_up: bytes saved on file {_CACHE_FILE} and vllm bytes match")
+        except RuntimeError as err:
+            print(err, flush=True)
 
     @contextmanager
     def use_memory_pool(self, tag: Optional[str] = None):
         """
         A context manager to use the memory pool.
-        All memory allocation created inside the context will be allocated 
+        All memory allocation created inside the context will be allocated
         in the memory pool, and has the specified tag.
 
         :param tag: The tag of the memory allocation. If None, the default tag
