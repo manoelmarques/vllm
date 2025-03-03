@@ -10,12 +10,59 @@
 import dataclasses
 import os
 from contextlib import contextmanager
+import os
 from typing import Any, Callable, Dict, Optional, Tuple, Union
 
 import torch
+import struct
+import ctypes
+import io
+import contextlib
+import uuid
+import mmap
 
+from vllm.logger import init_logger
+from vllm.logging_utils import timelog
 from vllm.utils import is_pin_memory_available
 
+logger = init_logger(__name__)
+
+def _copy_from_cuda_to_bytes(scr_ptr: int, size_in_bytes: int) -> bytes:
+    dest_ptr = ctypes.create_string_buffer(size_in_bytes)
+    libcudart.cudaMemcpy(dest_ptr, scr_ptr, size_in_bytes)
+    return bytes(dest_ptr)
+
+def _copy_from_bytes_to_cuda(dest_ptr: int, data: bytes) -> None:
+    # reserve space for 0 termination
+    scr_ptr = ctypes.create_string_buffer(data,len(data))
+    libcudart.cudaMemcpy(dest_ptr, scr_ptr, len(data))
+
+def _write_bytes(data: bytes, binary_file: io.BufferedWriter) -> None:
+    # Pack the length as a 4-byte unsigned integer (little-endian)
+    data_len = len(data)
+    header = struct.pack("<I", data_len)
+    binary_file.write(header)
+    if data_len > 0:
+        binary_file.write(data)
+
+def _read_bytes(mmap_obj: mmap.mmap) -> bytes:
+    header = mmap_obj.read(4)
+    if not header:
+        raise ValueError("Missing header read")
+
+    if len(header) != 4:
+        raise ValueError("Incomplete header read")
+
+    data_len = struct.unpack("<I", header)[0]
+    if data_len == 0:
+        return bytes()
+
+    data = mmap_obj.read(data_len)
+
+    if len(data) != data_len:
+        raise ValueError("Incomplete data read")
+
+    return data
 
 def find_loaded_library(lib_name) -> Optional[str]:
     """
@@ -150,6 +197,7 @@ class CuMemAllocator:
         self.pointer_to_data: Dict[int, AllocationData] = {}
         self.current_tag: str = CuMemAllocator.default_tag
         self.allocator_and_pools: Dict[str, Any] = {}
+        self.cache_file_name = ""
 
     def python_malloc_callback(self, allocation_handle: HandleType) -> None:
         """
@@ -169,13 +217,15 @@ class CuMemAllocator:
             data.cpu_backup_tensor = None
         return data.handle
 
+    @timelog
     def sleep(
             self,
+            level: Optional[int] = 1,
             offload_tags: Optional[Union[Tuple[str, ...],
                                          str]] = None) -> None:
         """
         Put the allocator in sleep mode.
-        All data in the memory allocation with the specified tag will be 
+        All data in the memory allocation with the specified tag will be
         offloaded to CPU memory, and others will be discarded.
 
         :param offload_tags: The tags of the memory allocation that will be
@@ -189,6 +239,33 @@ class CuMemAllocator:
             offload_tags = (offload_tags, )
 
         assert isinstance(offload_tags, tuple)
+
+        if self.cache_file_name != "":
+             # remove any previous file if exists
+            filen_name = self.cache_file_name
+            self.cache_file_name = ""
+            with contextlib.suppress(FileNotFoundError):
+                os.remove(filen_name)
+
+        # level 3 handling
+        if level == 3:
+            # level 3 write to file
+            unique_id = uuid.uuid4().hex
+            self.cache_file_name = f"vllm_cache_{unique_id}.bin"
+            logger.info("sleep level %d write to cache file %s",level,self.cache_file_name)
+            with open(self.cache_file_name, 'wb') as binary_file:
+                for ptr, data in self.pointer_to_data.items():
+                    handle = data.handle
+                    if data.tag in offload_tags:
+                        size_in_bytes = handle[1]
+                        data = _copy_from_cuda_to_bytes(ptr, size_in_bytes)
+                        _write_bytes(data, binary_file)
+                    else:
+                        _write_bytes(bytes(), binary_file)
+                    unmap_and_release(handle)
+            return
+
+        # handle other levels
 
         for ptr, data in self.pointer_to_data.items():
             handle = data.handle
@@ -204,28 +281,41 @@ class CuMemAllocator:
                 data.cpu_backup_tensor = cpu_backup_tensor
             unmap_and_release(handle)
 
+    @timelog
     def wake_up(self):
         """
         Wake up the allocator from sleep mode.
-        All data that is previously offloaded will be loaded back to GPU 
+        All data that is previously offloaded will be loaded back to GPU
         memory, and the rest of the data will have empty memory."""
-        for ptr, data in self.pointer_to_data.items():
-            handle = data.handle
-            create_and_map(handle)
-            if data.cpu_backup_tensor is not None:
-                cpu_backup_tensor = data.cpu_backup_tensor
-                if cpu_backup_tensor is not None:
-                    size_in_bytes = cpu_backup_tensor.numel(
-                    ) * cpu_backup_tensor.element_size()
-                    cpu_ptr = cpu_backup_tensor.data_ptr()
-                    libcudart.cudaMemcpy(ptr, cpu_ptr, size_in_bytes)
-                    data.cpu_backup_tensor = None
+        if self.cache_file_name != "":
+            logger.info("wake up read from cache file %s",self.cache_file_name)
+            with open(self.cache_file_name, 'rb') as binary_file:
+                with mmap.mmap(binary_file.fileno(), length=0, access=mmap.ACCESS_READ) as mmap_obj:
+                    for ptr, data in self.pointer_to_data.items():
+                        handle = data.handle
+                        create_and_map(handle)
+                        data = _read_bytes(mmap_obj)
+                        if len(data) > 0:
+                            _copy_from_bytes_to_cuda(ptr,data)
+        else:
+            logger.info("wake up read from tensors")
+            for ptr, data in self.pointer_to_data.items():
+                handle = data.handle
+                create_and_map(handle)
+                if data.cpu_backup_tensor is not None:
+                    cpu_backup_tensor = data.cpu_backup_tensor
+                    if cpu_backup_tensor is not None:
+                        size_in_bytes = cpu_backup_tensor.numel(
+                        ) * cpu_backup_tensor.element_size()
+                        cpu_ptr = cpu_backup_tensor.data_ptr()
+                        libcudart.cudaMemcpy(ptr, cpu_ptr, size_in_bytes)
+                        data.cpu_backup_tensor = None
 
     @contextmanager
     def use_memory_pool(self, tag: Optional[str] = None):
         """
         A context manager to use the memory pool.
-        All memory allocation created inside the context will be allocated 
+        All memory allocation created inside the context will be allocated
         in the memory pool, and has the specified tag.
 
         :param tag: The tag of the memory allocation. If None, the default tag
