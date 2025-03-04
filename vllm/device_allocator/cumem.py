@@ -9,6 +9,7 @@
 # the only successful approach is to call cuda driver API in C.
 import dataclasses
 from contextlib import contextmanager
+import os
 from typing import Any, Callable, Dict, Optional, Tuple, Union
 
 import torch
@@ -207,6 +208,7 @@ class CuMemAllocator:
 
     def sleep(
             self,
+            level: Optional[int] = 1,
             offload_tags: Optional[Union[Tuple[str, ...],
                                          str]] = None) -> None:
         """
@@ -231,16 +233,18 @@ class CuMemAllocator:
                 handle = data.handle
                 if data.tag in offload_tags:
                     size_in_bytes = handle[1]
-                    #cpu_backup_tensor = torch.empty(
-                    #    size_in_bytes,
-                    #    dtype=torch.uint8,
-                    #    device='cpu',
-                    #    pin_memory=is_pin_memory_available())
-                    #cpu_ptr = cpu_backup_tensor.data_ptr()
-                    #libcudart.cudaMemcpy(cpu_ptr, ptr, size_in_bytes)
-                    #data.cpu_backup_tensor = cpu_backup_tensor
-                    data = _copy_from_cuda_to_bytes(ptr, size_in_bytes)
-                    _write_bytes(data, binary_file)
+                    if level == 1:
+                        cpu_backup_tensor = torch.empty(
+                            size_in_bytes,
+                            dtype=torch.uint8,
+                            device='cpu',
+                            pin_memory=is_pin_memory_available())
+                        cpu_ptr = cpu_backup_tensor.data_ptr()
+                        libcudart.cudaMemcpy(cpu_ptr, ptr, size_in_bytes)
+                        data.cpu_backup_tensor = cpu_backup_tensor
+                    elif level == 3:
+                        data = _copy_from_cuda_to_bytes(ptr, size_in_bytes)
+                        _write_bytes(data, binary_file)
                 else:
                     _write_bytes(bytes(), binary_file)
                 unmap_and_release(handle)
@@ -250,21 +254,26 @@ class CuMemAllocator:
         Wake up the allocator from sleep mode.
         All data that is previously offloaded will be loaded back to GPU
         memory, and the rest of the data will have empty memory."""
-        with open(_CACHE_FILE, 'rb') as binary_file:
+        if os.path.exists(_CACHE_FILE):
+            with open(_CACHE_FILE, 'rb') as binary_file:
+                for ptr, data in self.pointer_to_data.items():
+                    handle = data.handle
+                    create_and_map(handle)
+                    data = _read_bytes(binary_file)
+                    if len(data) > 0:
+                        _copy_from_bytes_to_cuda(ptr,data)
+        else:
             for ptr, data in self.pointer_to_data.items():
                 handle = data.handle
                 create_and_map(handle)
-                data = _read_bytes(binary_file)
-                if len(data) > 0:
-                    _copy_from_bytes_to_cuda(ptr,data)
-                #if data.cpu_backup_tensor is not None:
-                    #cpu_backup_tensor = data.cpu_backup_tensor
-                    #if cpu_backup_tensor is not None:
-                        #size_in_bytes = cpu_backup_tensor.numel(
-                        #) * cpu_backup_tensor.element_size()
-                        #cpu_ptr = cpu_backup_tensor.data_ptr()
-                        # libcudart.cudaMemcpy(ptr, cpu_ptr, size_in_bytes)
-                        #data.cpu_backup_tensor = None
+                if data.cpu_backup_tensor is not None:
+                    cpu_backup_tensor = data.cpu_backup_tensor
+                    if cpu_backup_tensor is not None:
+                        size_in_bytes = cpu_backup_tensor.numel(
+                        ) * cpu_backup_tensor.element_size()
+                        cpu_ptr = cpu_backup_tensor.data_ptr()
+                        libcudart.cudaMemcpy(ptr, cpu_ptr, size_in_bytes)
+                        data.cpu_backup_tensor = None
 
     @contextmanager
     def use_memory_pool(self, tag: Optional[str] = None):
