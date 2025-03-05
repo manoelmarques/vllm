@@ -16,17 +16,20 @@ import torch
 import struct
 import ctypes
 import io
+import contextlib
+import uuid
+import mmap
 
+from vllm.logger import init_logger
+from vllm.logging_utils import timelog
 from vllm.utils import is_pin_memory_available
 
-_CACHE_FILE = "binary_file.bin"
+logger = init_logger(__name__)
 
 def _copy_from_cuda_to_bytes(scr_ptr: int, size_in_bytes: int) -> bytes:
-    # reserve space for 0 termination
-    dest_ptr = ctypes.create_string_buffer(size_in_bytes+1)
+    dest_ptr = ctypes.create_string_buffer(size_in_bytes)
     libcudart.cudaMemcpy(dest_ptr, scr_ptr, size_in_bytes)
-    # do not include 0 termination
-    return bytes(dest_ptr[:-1])
+    return bytes(dest_ptr)
 
 def _copy_from_bytes_to_cuda(dest_ptr: int, data: bytes) -> None:
     # reserve space for 0 termination
@@ -41,8 +44,8 @@ def _write_bytes(data: bytes, binary_file: io.BufferedWriter) -> None:
     if data_len > 0:
         binary_file.write(data)
 
-def _read_bytes(binary_file: io.BufferedReader) -> bytes:
-    header = binary_file.read(4)
+def _read_bytes(mmap_obj: mmap.mmap) -> bytes:
+    header = mmap_obj.read(4)
     if not header:
         raise ValueError("Missing header read")
 
@@ -53,7 +56,7 @@ def _read_bytes(binary_file: io.BufferedReader) -> bytes:
     if data_len == 0:
         return bytes()
 
-    data = binary_file.read(data_len)
+    data = mmap_obj.read(data_len)
 
     if len(data) != data_len:
         raise ValueError("Incomplete data read")
@@ -187,6 +190,7 @@ class CuMemAllocator:
         self.pointer_to_data: Dict[int, AllocationData] = {}
         self.current_tag: str = CuMemAllocator.default_tag
         self.allocator_and_pools: Dict[str, Any] = {}
+        self.cache_file_name = ""
 
     def python_malloc_callback(self, allocation_handle: HandleType) -> None:
         """
@@ -206,6 +210,7 @@ class CuMemAllocator:
             data.cpu_backup_tensor = None
         return data.handle
 
+    @timelog
     def sleep(
             self,
             level: Optional[int] = 1,
@@ -228,41 +233,65 @@ class CuMemAllocator:
 
         assert isinstance(offload_tags, tuple)
 
-        with open(_CACHE_FILE, 'wb') as binary_file:
-            for ptr, data in self.pointer_to_data.items():
-                handle = data.handle
-                if data.tag in offload_tags:
-                    size_in_bytes = handle[1]
-                    if level == 1:
-                        cpu_backup_tensor = torch.empty(
-                            size_in_bytes,
-                            dtype=torch.uint8,
-                            device='cpu',
-                            pin_memory=is_pin_memory_available())
-                        cpu_ptr = cpu_backup_tensor.data_ptr()
-                        libcudart.cudaMemcpy(cpu_ptr, ptr, size_in_bytes)
-                        data.cpu_backup_tensor = cpu_backup_tensor
-                    elif level == 3:
+        if self.cache_file_name != "":
+             # remove any previous file if exists
+            filen_name = self.cache_file_name
+            self.cache_file_name = ""
+            with contextlib.suppress(FileNotFoundError):
+                os.remove(filen_name)
+
+        # level 3 handling
+        if level == 3:
+            # level 3 write to file
+            unique_id = uuid.uuid4().hex
+            self.cache_file_name = f"vllm_cache_{unique_id}.bin"
+            logger.info("sleep level %d write to cache file %s",level,self.cache_file_name)
+            with open(self.cache_file_name, 'wb') as binary_file:
+                for ptr, data in self.pointer_to_data.items():
+                    handle = data.handle
+                    if data.tag in offload_tags:
+                        size_in_bytes = handle[1]
                         data = _copy_from_cuda_to_bytes(ptr, size_in_bytes)
                         _write_bytes(data, binary_file)
-                else:
-                    _write_bytes(bytes(), binary_file)
-                unmap_and_release(handle)
+                    else:
+                        _write_bytes(bytes(), binary_file)
+                    unmap_and_release(handle)
+            return
 
+        # handle other levels
+
+        for ptr, data in self.pointer_to_data.items():
+            handle = data.handle
+            if data.tag in offload_tags:
+                size_in_bytes = handle[1]
+                cpu_backup_tensor = torch.empty(
+                    size_in_bytes,
+                    dtype=torch.uint8,
+                    device='cpu',
+                    pin_memory=is_pin_memory_available())
+                cpu_ptr = cpu_backup_tensor.data_ptr()
+                libcudart.cudaMemcpy(cpu_ptr, ptr, size_in_bytes)
+                data.cpu_backup_tensor = cpu_backup_tensor
+            unmap_and_release(handle)
+
+    @timelog
     def wake_up(self):
         """
         Wake up the allocator from sleep mode.
         All data that is previously offloaded will be loaded back to GPU
         memory, and the rest of the data will have empty memory."""
-        if os.path.exists(_CACHE_FILE):
-            with open(_CACHE_FILE, 'rb') as binary_file:
-                for ptr, data in self.pointer_to_data.items():
-                    handle = data.handle
-                    create_and_map(handle)
-                    data = _read_bytes(binary_file)
-                    if len(data) > 0:
-                        _copy_from_bytes_to_cuda(ptr,data)
+        if self.cache_file_name != "":
+            logger.info("wake up read from cache file %s",self.cache_file_name)
+            with open(self.cache_file_name, 'rb') as binary_file:
+                with mmap.mmap(binary_file.fileno(), length=0, access=mmap.ACCESS_READ) as mmap_obj:
+                    for ptr, data in self.pointer_to_data.items():
+                        handle = data.handle
+                        create_and_map(handle)
+                        data = _read_bytes(mmap_obj)
+                        if len(data) > 0:
+                            _copy_from_bytes_to_cuda(ptr,data)
         else:
+            logger.info("wake up read from tensors")
             for ptr, data in self.pointer_to_data.items():
                 handle = data.handle
                 create_and_map(handle)
