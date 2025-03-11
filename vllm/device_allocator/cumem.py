@@ -247,12 +247,11 @@ class CuMemAllocator:
             with contextlib.suppress(FileNotFoundError):
                 os.remove(filen_name)
 
-        # level 3 handling
+        # level 3 write weights to file
         if level == 3:
-            # level 3 write to file
             unique_id = uuid.uuid4().hex
             self.cache_file_name = f"vllm_cache_{unique_id}.bin"
-            logger.info("sleep level %d write to cache file %s",level,self.cache_file_name)
+            logger.info("sleep level %d writing to cache file %s",level,self.cache_file_name)
             with open(self.cache_file_name, 'wb') as binary_file:
                 for ptr, data in self.pointer_to_data.items():
                     handle = data.handle
@@ -266,7 +265,6 @@ class CuMemAllocator:
             return
 
         # handle other levels
-
         for ptr, data in self.pointer_to_data.items():
             handle = data.handle
             if data.tag in offload_tags:
@@ -288,7 +286,7 @@ class CuMemAllocator:
         All data that is previously offloaded will be loaded back to GPU
         memory, and the rest of the data will have empty memory."""
         if self.cache_file_name != "":
-            logger.info("wake up read from cache file %s",self.cache_file_name)
+            logger.info("wake_up reading from cache file %s",self.cache_file_name)
             with open(self.cache_file_name, 'rb') as binary_file:
                 with mmap.mmap(binary_file.fileno(), length=0, access=mmap.ACCESS_READ) as mmap_obj:
                     for ptr, data in self.pointer_to_data.items():
@@ -298,11 +296,11 @@ class CuMemAllocator:
                         if len(data) > 0:
                             _copy_from_bytes_to_cuda(ptr,data)
         else:
-            logger.info("wake up read from tensors")
             for ptr, data in self.pointer_to_data.items():
                 handle = data.handle
                 create_and_map(handle)
                 if data.cpu_backup_tensor is not None:
+                    logger.info("wake_up reading from cpu memory")
                     cpu_backup_tensor = data.cpu_backup_tensor
                     if cpu_backup_tensor is not None:
                         size_in_bytes = cpu_backup_tensor.numel(
