@@ -76,8 +76,8 @@ def adjust_bitsandbytes_4bit_shard(param: Parameter,
 def adjust_scalar_to_fused_array(param, loaded_weight, shard_id):
     """For fused modules (QKV and MLP) we have an array of length
     N that holds 1 scale for each "logical" matrix. So the param
-    is an array of length N. The loaded_weight corresponds to 
-    one of the shards on disk. Here, we slice the param based on 
+    is an array of length N. The loaded_weight corresponds to
+    one of the shards on disk. Here, we slice the param based on
     the shard_id for loading.
     """
     qkv_idxs = {"q": 0, "k": 1, "v": 2}
@@ -104,13 +104,13 @@ def left_shift_bitsandbytes_4bit_shard(bnb_weight_attrs: dict[str, Any]):
 
     For example, given bnb weight attributes as below:
     {
-        'bnb_shard_offsets': array([0, 4, 8, 16]), 
+        'bnb_shard_offsets': array([0, 4, 8, 16]),
         'bnb_quant_state': {0: ..., 1: ..., 2: ...},
     }
 
     The function will return:
     {
-        'bnb_shard_offsets': array([0, 4]), 
+        'bnb_shard_offsets': array([0, 4]),
         'bnb_quant_state': {0: ...},
     }
     and
@@ -142,13 +142,13 @@ class LinearMethodBase(QuantizeMethodBase):
                        output_partition_sizes: list[int], input_size: int,
                        output_size: int, params_dtype: torch.dtype,
                        **extra_weight_attrs):
-        """Create weights for a linear layer. 
+        """Create weights for a linear layer.
            The weights will be set as attributes of the layer.
 
         Args:
             layer: The layer that is using the LinearMethodBase factory.
             input_size_per_partition: Size of the weight input dim on rank X.
-            output_partition_sizes: Sizes of the output dim of each logical 
+            output_partition_sizes: Sizes of the output dim of each logical
                 weight on rank X. E.g., output_partition_sizes for QKVLinear
                 is a list contains the width of Wq, Wk, Wv on rank X.
             input_size: Size of the input dim of the weight across all ranks.
@@ -311,7 +311,7 @@ class ReplicatedLinear(LinearBase):
         assert param.size() == loaded_weight.size(), (
             f"Tried to load weights of size {loaded_weight.size()}"
             f"to a parameter of size {param.size()}")
-        param.data.copy_(loaded_weight)
+        param.data.copy_(loaded_weight.pin_memory(), non_blocking=True)
 
     def forward(
         self, x: torch.Tensor
@@ -352,7 +352,7 @@ class ColumnParallelLinear(LinearBase):
         output_sizes: list of output sizes packed into one output, like for QKV
                        the list would be size 3.
         prefix: The name of the layer in the state dict, including all parents
-                        (e.g. model.layers.0.qkv_proj) 
+                        (e.g. model.layers.0.qkv_proj)
     """
 
     def __init__(
@@ -454,7 +454,7 @@ class ColumnParallelLinear(LinearBase):
             loaded_weight = loaded_weight.reshape(1)
 
         assert param_data.shape == loaded_weight.shape
-        param_data.copy_(loaded_weight)
+        param_data.copy_(loaded_weight.pin_memory(), non_blocking=True)
 
     def weight_loader_v2(self, param: Parameter, loaded_weight: torch.Tensor):
         # Special case for loading scales off disk, which often do not
@@ -551,7 +551,8 @@ class MergedColumnParallelLinear(ColumnParallelLinear):
         is_gguf_weight_type = getattr(param, "is_gguf_weight_type", False)
         if is_gguf_weight_type:
             if loaded_shard_id is not None:
-                param.data[loaded_shard_id].copy_(loaded_weight)
+                param.data[loaded_shard_id].copy_(loaded_weight.pin_memory(),
+                                                  non_blocking=True)
                 param.shard_weight_type[loaded_shard_id] = loaded_weight.item()
             else:
                 param.shard_weight_type = {
@@ -594,7 +595,7 @@ class MergedColumnParallelLinear(ColumnParallelLinear):
                         param_data, loaded_weight, 0)
 
                 assert param_data.shape == loaded_weight.shape
-                param_data.copy_(loaded_weight)
+                param_data.copy_(loaded_weight.pin_memory(), non_blocking=True)
                 return
             current_shard_offset = 0
             use_bitsandbytes_4bit = getattr(param, "use_bitsandbytes_4bit",
@@ -686,7 +687,7 @@ class MergedColumnParallelLinear(ColumnParallelLinear):
                     "the same for all partitions.")
 
         assert param_data.shape == loaded_weight.shape
-        param_data.copy_(loaded_weight)
+        param_data.copy_(loaded_weight.pin_memory(), non_blocking=True)
 
     def _load_fused_module_from_checkpoint(self, param: BasevLLMParameter,
                                            loaded_weight: torch.Tensor):
@@ -827,7 +828,7 @@ class QKVParallelLinear(ColumnParallelLinear):
         self.output_sizes = [
             self.num_heads * self.head_size * tp_size,  # q_proj
             self.num_kv_heads * self.head_size * tp_size,  # k_proj
-            self.num_kv_heads * self.head_size * tp_size,  # v_proj 
+            self.num_kv_heads * self.head_size * tp_size,  # v_proj
         ]
 
         super().__init__(input_size=input_size,
@@ -860,7 +861,7 @@ class QKVParallelLinear(ColumnParallelLinear):
     def _load_fused_module_from_checkpoint(self, param: BasevLLMParameter,
                                            loaded_weight: torch.Tensor):
         """
-        Handle special case for models where QKV layers are already 
+        Handle special case for models where QKV layers are already
         fused on disk. In this case, we have no shard id. This function
         determmines the shard id by splitting these layers and then calls
         the weight loader using the shard id.
@@ -931,7 +932,8 @@ class QKVParallelLinear(ColumnParallelLinear):
         if is_gguf_weight_type:
             idx_map = {"q": 0, "k": 1, "v": 2}
             if loaded_shard_id is not None:
-                param.data[idx_map[loaded_shard_id]].copy_(loaded_weight)
+                param.data[idx_map[loaded_shard_id]].copy_(
+                    loaded_weight.pin_memory(), non_blocking=True)
                 param.shard_weight_type[loaded_shard_id] = loaded_weight.item()
             else:
                 param.shard_weight_type = {
@@ -975,7 +977,7 @@ class QKVParallelLinear(ColumnParallelLinear):
                         param_data, loaded_weight, 0)
 
                 assert param_data.shape == loaded_weight.shape
-                param_data.copy_(loaded_weight)
+                param_data.copy_(loaded_weight.pin_memory(), non_blocking=True)
                 return
             shard_offsets = [
                 # (shard_id, shard_offset, shard_size)
@@ -1104,7 +1106,7 @@ class QKVParallelLinear(ColumnParallelLinear):
                     "for all partitions.")
 
         assert param_data.shape == loaded_weight.shape
-        param_data.copy_(loaded_weight)
+        param_data.copy_(loaded_weight.pin_memory(), non_blocking=True)
 
 
 class RowParallelLinear(LinearBase):
@@ -1226,7 +1228,7 @@ class RowParallelLinear(LinearBase):
             loaded_weight = loaded_weight.reshape(1)
 
         assert param_data.shape == loaded_weight.shape
-        param_data.copy_(loaded_weight)
+        param_data.copy_(loaded_weight.pin_memory(), non_blocking=True)
 
     def weight_loader_v2(self, param: BasevLLMParameter,
                          loaded_weight: torch.Tensor):
@@ -1430,7 +1432,7 @@ class QKVCrossParallelLinear(LinearBase):
         param: nn.Parameter,
     ) -> nn.Parameter:
         """
-        Given the placeholder param, 
+        Given the placeholder param,
         return the corresponding param in the proj layers.
         """
         target_param_list = [
