@@ -464,7 +464,7 @@ def fastsafetensors_weights_iterator(
     hf_weights_files: List[str],
     use_tqdm_on_load: bool,
 ) -> Generator[Tuple[str, torch.Tensor], None, None]:
-    """Iterate over the weights in the model safetensor files 
+    """Iterate over the weights in the model safetensor files
     using fastsafetensor library."""
     if torch.distributed.is_initialized():
         pg = torch.distributed.group.WORLD
@@ -477,13 +477,22 @@ def fastsafetensors_weights_iterator(
         for i in range(0, len(hf_weights_files), pg.size())
     ]
 
+    nogds = os.getenv("FASTSAFETENSOR_NOGDS", "False").lower() == "true"
+    fastsafe_debug = (
+        os.getenv("FASTSAFETENSOR_DEBUG", "False").lower() == "true"
+    )
+    logger.info(
+        "fastsafetensor options nogds %s, debug %s", nogds, fastsafe_debug
+    )
+
     for f_list in tqdm(
             weight_files_sub_lists,
             desc="Loading safetensors using Fastsafetensor loader",
             disable=not enable_tqdm(use_tqdm_on_load),
             bar_format=_BAR_FORMAT,
     ):
-        loader = SafeTensorsFileLoader(pg, device)
+        loader = SafeTensorsFileLoader(pg, device,
+                                       nogds=nogds, debug_log=fastsafe_debug)
         rank_file_map = {i: [f] for i, f in enumerate(f_list)}
         loader.add_filenames(rank_file_map)
         try:
