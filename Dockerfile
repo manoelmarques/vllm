@@ -30,6 +30,9 @@ ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 # Reference: https://github.com/astral-sh/uv/pull/1694
 ENV UV_HTTP_TIMEOUT=500
 
+# Install fastsafetensors build dependencies
+RUN apt-get install -y libnuma-dev
+
 # Upgrade to GCC 10 to avoid https://gcc.gnu.org/bugzilla/show_bug.cgi?id=92519
 # as it was causing spam when compiling the CUTLASS kernels
 RUN apt-get install -y gcc-10 g++-10
@@ -37,6 +40,9 @@ RUN update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-10 110 --slave /
 RUN <<EOF
 gcc --version
 EOF
+
+# Install vmtouch
+RUN apt-get install -y vmtouch
 
 # Workaround for https://github.com/openai/triton/issues/2507 and
 # https://github.com/pytorch/pytorch/issues/107960 -- hopefully
@@ -60,6 +66,10 @@ COPY requirements/common.txt requirements/common.txt
 COPY requirements/cuda.txt requirements/cuda.txt
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install -r requirements/cuda.txt
+
+# Install pinned version of fastsafetensors
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install fastsafetensors==0.1.10
 
 # cuda arch list used by torch
 # can be useful for both `dev` and `test`
@@ -189,6 +199,12 @@ ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 # Reference: https://github.com/astral-sh/uv/pull/1694
 ENV UV_HTTP_TIMEOUT=500
 
+# Install fastsafetensors build dependencies
+RUN apt-get install -y libnuma-dev
+
+# Install vmtouch
+RUN apt-get install -y vmtouch
+
 # Workaround for https://github.com/openai/triton/issues/2507 and
 # https://github.com/pytorch/pytorch/issues/107960 -- hopefully
 # this won't be needed for future versions of this docker image
@@ -204,6 +220,10 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         uv pip install --index-url https://download.pytorch.org/whl/nightly/cu128 "torch==2.8.0.dev20250318+cu128" "torchvision==0.22.0.dev20250319";  \
         uv pip install --index-url https://download.pytorch.org/whl/nightly/cu128 --pre pytorch_triton==3.3.0+gitab727c40; \
     fi
+
+# Install pinned version of fastsafetensors
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install fastsafetensors==0.1.10
 
 # Install vllm wheel first, so that torch etc will be installed.
 RUN --mount=type=bind,from=build,src=/workspace/dist,target=/vllm-workspace/dist \
