@@ -2,6 +2,7 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import itertools
+import time
 import warnings
 from collections.abc import Sequence
 from contextlib import contextmanager
@@ -229,6 +230,7 @@ class LLM:
         else:
             compilation_config_instance = CompilationConfig()
 
+        start = time.perf_counter()
         engine_args = EngineArgs(
             model=model,
             task=task,
@@ -257,11 +259,17 @@ class LLM:
             compilation_config=compilation_config_instance,
             **kwargs,
         )
+        elapsed = time.perf_counter() - start
+        logger.debug("#### EngineArgs initialization took %.4f secs", elapsed)
 
+        start = time.perf_counter()
         # Create the Engine (autoselects V0 vs V1)
         self.llm_engine = LLMEngine.from_engine_args(
             engine_args=engine_args, usage_context=UsageContext.LLM_CLASS)
         self.engine_class = type(self.llm_engine)
+
+        elapsed = time.perf_counter() - start
+        logger.debug("#### Engine creation took %.4f secs", elapsed)
 
         self.request_counter = Counter()
         self.default_sampling_params: Union[dict[str, Any], None] = None
@@ -1325,16 +1333,16 @@ class LLM:
         during the sleep period, before `wake_up` is called.
 
         Args:
-            level: The sleep level. Level 1 sleep will offload the model 
-                weights and discard the kv cache. The content of kv cache 
+            level: The sleep level. Level 1 sleep will offload the model
+                weights and discard the kv cache. The content of kv cache
                 is forgotten. Level 1 sleep is good for sleeping and waking
-                up the engine to run the same model again. The model weights 
-                are backed up in CPU memory. Please make sure there's enough 
-                CPU memory to store the model weights. Level 2 sleep will 
-                discard both the model weights and the kv cache. The content 
-                of both the model weights and kv cache is forgotten. Level 2 
+                up the engine to run the same model again. The model weights
+                are backed up in CPU memory. Please make sure there's enough
+                CPU memory to store the model weights. Level 2 sleep will
+                discard both the model weights and the kv cache. The content
+                of both the model weights and kv cache is forgotten. Level 2
                 sleep is good for sleeping and waking up the engine to run a
-                different model or update the model, where previous model 
+                different model or update the model, where previous model
                 weights are not needed. It reduces CPU memory pressure.
         """
         self.reset_prefix_cache()
@@ -1344,12 +1352,12 @@ class LLM:
         """
         Wake up the engine from sleep mode. See the [sleep][] method
         for more details.
-        
+
         Args:
-            tags: An optional list of tags to reallocate the engine memory 
-                for specific memory allocations. Values must be in 
+            tags: An optional list of tags to reallocate the engine memory
+                for specific memory allocations. Values must be in
                 `("weights", "kv_cache")`. If None, all memory is reallocated.
-                wake_up should be called with all tags (or None) before the 
+                wake_up should be called with all tags (or None) before the
                 engine is used again.
         """
         self.llm_engine.wake_up(tags)
