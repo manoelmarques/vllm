@@ -3,15 +3,43 @@
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, NamedTuple, Optional, Union
+import time
+
+
+from vllm.logger import init_logger
+
+logger = init_logger(__name__)
 
 import torch
+
+start_init = time.perf_counter()
+
 from transformers import BatchFeature, PretrainedConfig, ProcessorMixin
+
+elapsed = time.perf_counter() - start_init
+logger.debug("#### registry import transformers in %.4f secs", elapsed)
+start_init = time.perf_counter()
+
 from typing_extensions import TypeVar
 
 from vllm.jsontree import JSONTree, json_map_leaves
-from vllm.logger import init_logger
+
+elapsed = time.perf_counter() - start_init
+logger.debug("#### registry import vllm.jsontree in %.4f secs", elapsed)
+start_init = time.perf_counter()
+
 from vllm.transformers_utils.processor import cached_processor_from_config
+
+elapsed = time.perf_counter() - start_init
+logger.debug("#### registry import llm.transformers_utils.processor in %.4f secs", elapsed)
+start_init = time.perf_counter()
+
 from vllm.transformers_utils.tokenizer import AnyTokenizer
+
+elapsed = time.perf_counter() - start_init
+logger.debug("#### registry import vllm.transformers_utils.tokenizer in %.4f secs", elapsed)
+start_init = time.perf_counter()
+
 from vllm.utils import resolve_mm_processor_kwargs
 
 if TYPE_CHECKING:
@@ -23,9 +51,6 @@ if TYPE_CHECKING:
 _T = TypeVar("_T")
 _C = TypeVar("_C", bound=PretrainedConfig, default=PretrainedConfig)
 _P = TypeVar("_P", bound=ProcessorMixin, default=ProcessorMixin)
-
-logger = init_logger(__name__)
-
 
 @dataclass(frozen=True)
 class InputContext:
