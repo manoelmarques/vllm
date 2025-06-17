@@ -3,6 +3,7 @@
 
 import logging
 import os
+import time
 from typing import Any, Callable
 
 import torch
@@ -26,7 +27,9 @@ def load_plugins_by_group(group: str) -> dict[str, Callable[[], Any]]:
 
     allowed_plugins = envs.VLLM_PLUGINS
 
+    start = time.perf_counter()
     discovered_plugins = entry_points(group=group)
+    elapsed = time.perf_counter() - start
     if len(discovered_plugins) == 0:
         logger.debug("No plugins for group %s found.", group)
         return {}
@@ -35,6 +38,9 @@ def load_plugins_by_group(group: str) -> dict[str, Callable[[], Any]]:
     is_default_group = (group == DEFAULT_PLUGINS_GROUP)
     # Use INFO for non-default groups and DEBUG for the default group
     log_level = logger.debug if is_default_group else logger.info
+
+    log_level("#### importlib metadata entry_points function took %.4f secs",
+              elapsed)
 
     log_level("Available plugins for group %s:", group)
     for plugin in discovered_plugins:
@@ -45,17 +51,23 @@ def load_plugins_by_group(group: str) -> dict[str, Callable[[], Any]]:
                   "Set `VLLM_PLUGINS` to control which plugins to load.")
 
     plugins = dict[str, Callable[[], Any]]()
+    start = time.perf_counter()
     for plugin in discovered_plugins:
         if allowed_plugins is None or plugin.name in allowed_plugins:
             if allowed_plugins is not None:
                 log_level("Loading plugin %s", plugin.name)
 
             try:
+                start_load = time.perf_counter()
                 func = plugin.load()
+                elapsed_load = time.perf_counter() - start_load
+                log_level("#### plugin %s loaded in %.4f secs", plugin.name,
+                          elapsed_load)
                 plugins[plugin.name] = func
             except Exception:
                 logger.exception("Failed to load plugin %s", plugin.name)
-
+    elapsed = time.perf_counter() - start
+    log_level("#### plugins load loop took %.4f secs", elapsed)
     return plugins
 
 
@@ -90,5 +102,8 @@ def load_general_plugins():
 
     plugins = load_plugins_by_group(group=DEFAULT_PLUGINS_GROUP)
     # general plugins, we only need to execute the loaded functions
+    start = time.perf_counter()
     for func in plugins.values():
         func()
+    elapsed = time.perf_counter() - start
+    logger.debug("#### plugins func() loop took %.4f secs", elapsed)

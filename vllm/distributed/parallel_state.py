@@ -25,6 +25,7 @@ If you only need to use the distributed environment without model/pipeline
 import contextlib
 import gc
 import pickle
+import time
 import weakref
 from collections import namedtuple
 from contextlib import contextmanager, nullcontext
@@ -146,8 +147,14 @@ def all_gather_fake(tensor: torch.Tensor, dim: int, world_size: int,
     return torch.empty(new_shape, dtype=tensor.dtype, device=tensor.device)
 
 
+logger = init_logger(__name__)
+
 if supports_custom_op():
+    start = time.perf_counter()
     from vllm.platforms import current_platform
+    elapsed = time.perf_counter() - start
+    logger.debug("#### current_platform load took %.4f secs", elapsed)
+    start = time.perf_counter()
     direct_register_custom_op(
         op_name="all_reduce",
         op_func=all_reduce,
@@ -155,7 +162,10 @@ if supports_custom_op():
         fake_impl=all_reduce_fake,
         dispatch_key=current_platform.dispatch_key,
     )
+    elapsed = time.perf_counter() - start
+    logger.debug("#### all_reduce register took %.4f secs", elapsed)
 
+    start = time.perf_counter()
     direct_register_custom_op(
         op_name="reduce_scatter",
         op_func=reduce_scatter,
@@ -163,7 +173,10 @@ if supports_custom_op():
         fake_impl=reduce_scatter_fake,
         dispatch_key=current_platform.dispatch_key,
     )
+    elapsed = time.perf_counter() - start
+    logger.debug("#### reduce_scatter register took %.4f secs", elapsed)
 
+    start = time.perf_counter()
     direct_register_custom_op(
         op_name="all_gather",
         op_func=all_gather,
@@ -171,6 +184,8 @@ if supports_custom_op():
         fake_impl=all_gather_fake,
         dispatch_key=current_platform.dispatch_key,
     )
+    elapsed = time.perf_counter() - start
+    logger.debug("#### all_gather register took %.4f secs", elapsed)
 
 
 class GroupCoordinator:
@@ -912,8 +927,6 @@ def graph_capture(device: torch.device):
             context):
         yield context
 
-
-logger = init_logger(__name__)
 
 _ENABLE_CUSTOM_ALL_REDUCE = True
 

@@ -5,16 +5,26 @@ import os
 import platform
 import random
 import sys
+import time
 from datetime import timedelta
 from platform import uname
 from typing import TYPE_CHECKING, NamedTuple, Optional, Union
+
+from vllm.logger import init_logger
+
+logger = init_logger(__name__)
 
 import numpy as np
 import torch
 from torch.distributed import PrefixStore, ProcessGroup
 
+start_init = time.perf_counter()
+
 from vllm.inputs import ProcessorInputs, PromptType
-from vllm.logger import init_logger
+
+elapsed = time.perf_counter() - start_init
+logger.debug("#### interface init vllm.inputs loaded in %.4f secs", elapsed)
+start_init = time.perf_counter()
 
 if TYPE_CHECKING:
     from vllm.config import ModelConfig, VllmConfig
@@ -29,8 +39,6 @@ else:
     PoolingParams = None
     SamplingParams = None
     FlexibleArgumentParser = None
-
-logger = init_logger(__name__)
 
 
 def in_wsl() -> bool:

@@ -1,13 +1,29 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
+import time
+
+from vllm.logger import init_logger
+
+logger = init_logger(__name__)
+
+start_init = time.perf_counter()
+
 from .data import (DecoderOnlyInputs, EmbedsInputs, EncoderDecoderInputs,
                    ExplicitEncoderDecoderPrompt, ProcessorInputs, PromptType,
                    SingletonInputs, SingletonPrompt, TextPrompt, TokenInputs,
                    TokensPrompt, build_explicit_enc_dec_prompt, embeds_inputs,
                    to_enc_dec_tuple_list, token_inputs, zip_enc_dec_prompts)
+
+elapsed = time.perf_counter() - start_init
+logger.debug("#### data import loaded in %.4f secs", elapsed)
+start_init = time.perf_counter()
+
 from .registry import (DummyData, InputContext, InputProcessingContext,
                        InputRegistry)
+
+elapsed = time.perf_counter() - start_init
+logger.debug("#### registry import loaded in %.4f secs", elapsed)
 
 INPUT_REGISTRY = InputRegistry()
 """

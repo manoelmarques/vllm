@@ -2,6 +2,12 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import logging
+import time
+
+start_init = time.perf_counter()
+
+logger = logging.getLogger(__name__)
+
 import traceback
 from itertools import chain
 from typing import TYPE_CHECKING, Optional
@@ -9,10 +15,19 @@ from typing import TYPE_CHECKING, Optional
 from vllm.plugins import load_plugins_by_group
 from vllm.utils import resolve_obj_by_qualname, supports_xccl
 
-from .interface import _Backend  # noqa: F401
-from .interface import CpuArchEnum, Platform, PlatformEnum
+elapsed = time.perf_counter() - start_init
+logger.debug("#### platform init load_plugins_by_group loaded in %.4f secs",
+             elapsed)
 
-logger = logging.getLogger(__name__)
+start_init = time.perf_counter()
+
+from .interface import _Backend  # noqa: F401
+
+elapsed = time.perf_counter() - start_init
+logger.debug("#### platform init _Backend loaded in %.4f secs", elapsed)
+start_init = time.perf_counter()
+
+from .interface import CpuArchEnum, Platform, PlatformEnum
 
 
 def vllm_version_matches_substr(substr: str) -> bool:
@@ -281,11 +296,20 @@ def __getattr__(name: str):
         #    see the test failures).
         global _current_platform
         if _current_platform is None:
+            start = time.perf_counter()
             platform_cls_qualname = resolve_current_platform_cls_qualname()
+            elapsed = time.perf_counter() - start
+            logger.debug("#### platform %s resolved in %.4f secs",
+                         platform_cls_qualname, elapsed)
+            start = time.perf_counter()
             _current_platform = resolve_obj_by_qualname(
                 platform_cls_qualname)()
+            elapsed = time.perf_counter() - start
+            logger.debug("#### platform %s loaded in %.4f secs",
+                         platform_cls_qualname, elapsed)
             global _init_trace
             _init_trace = "".join(traceback.format_stack())
+
         return _current_platform
     elif name in globals():
         return globals()[name]

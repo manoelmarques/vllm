@@ -2,6 +2,7 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import itertools
+import time
 import warnings
 from collections.abc import Sequence
 from contextlib import contextmanager
@@ -241,6 +242,7 @@ class LLM:
         else:
             compilation_config_instance = CompilationConfig()
 
+        start = time.perf_counter()
         engine_args = EngineArgs(
             model=model,
             task=task,
@@ -269,11 +271,17 @@ class LLM:
             compilation_config=compilation_config_instance,
             **kwargs,
         )
+        elapsed = time.perf_counter() - start
+        logger.debug("#### EngineArgs initialization took %.4f secs", elapsed)
 
+        start = time.perf_counter()
         # Create the Engine (autoselects V0 vs V1)
         self.llm_engine = LLMEngine.from_engine_args(
             engine_args=engine_args, usage_context=UsageContext.LLM_CLASS)
         self.engine_class = type(self.llm_engine)
+
+        elapsed = time.perf_counter() - start
+        logger.debug("#### Engine creation took %.4f secs", elapsed)
 
         self.request_counter = Counter()
         self.default_sampling_params: Union[dict[str, Any], None] = None
