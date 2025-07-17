@@ -8,6 +8,15 @@ from collections.abc import Sequence
 from contextlib import contextmanager
 from typing import (TYPE_CHECKING, Any, Callable, ClassVar, Optional, Union,
                     cast, overload)
+import multiprocessing
+import os
+
+from vllm.logger import init_logger
+
+logger = init_logger(__name__)
+
+current_proc = multiprocessing.current_process()
+start_init = time.perf_counter()
 
 import cloudpickle
 import torch.nn as nn
@@ -37,7 +46,6 @@ from vllm.entrypoints.score_utils import (ScoreContentPartParam,
 from vllm.entrypoints.utils import _validate_truncation_size
 from vllm.inputs import PromptType, SingletonPrompt, TextPrompt, TokensPrompt
 from vllm.inputs.parse import parse_and_batch_prompt
-from vllm.logger import init_logger
 from vllm.lora.request import LoRARequest
 from vllm.model_executor.guided_decoding.guided_fields import (
     GuidedDecodingRequest, LLMGuidedOptions)
@@ -57,7 +65,8 @@ from vllm.utils import Counter, Device, deprecate_kwargs, is_list_of
 if TYPE_CHECKING:
     from vllm.v1.metrics.reader import Metric
 
-logger = init_logger(__name__)
+elapsed = time.perf_counter() - start_init
+logger.debug("#### llm imports in %.4f secs process %s pid %d", elapsed, current_proc.name, os.getpid())
 
 _R = TypeVar("_R", default=Any)
 
@@ -1377,17 +1386,17 @@ class LLM:
         of your inputs into a single list and pass it to this method.
 
         Supports both text and multi-modal data (images, etc.) when used with
-        appropriate multi-modal models. For multi-modal inputs, ensure the 
+        appropriate multi-modal models. For multi-modal inputs, ensure the
         prompt structure matches the model's expected input format.
 
         Args:
-            data_1: Can be a single prompt, a list of prompts or 
-                `ScoreMultiModalParam`, which can contain either text or 
-                multi-modal data. When a list, it must have the same length as 
+            data_1: Can be a single prompt, a list of prompts or
+                `ScoreMultiModalParam`, which can contain either text or
+                multi-modal data. When a list, it must have the same length as
                 the `data_2` list.
-            data_2: The data to pair with the query to form the input to 
+            data_2: The data to pair with the query to form the input to
                 the LLM. Can be text or multi-modal data. See [PromptType]
-                [vllm.inputs.PromptType] for more details about the format of 
+                [vllm.inputs.PromptType] for more details about the format of
                 each prompt.
             use_tqdm: If `True`, shows a tqdm progress bar.
                 If a callable (e.g., `functools.partial(tqdm, leave=False)`),
