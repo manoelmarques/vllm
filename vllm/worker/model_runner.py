@@ -1082,8 +1082,8 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
 
     def load_model(self) -> None:
         logger.info("Starting to load model %s...", self.model_config.model)
+        time_before_load = time.perf_counter()
         with DeviceMemoryProfiler(self.device) as m:
-            time_before_load = time.perf_counter()
             self.model = get_model(vllm_config=self.vllm_config)
             if self.lora_config:
                 assert supports_lora(
@@ -1110,7 +1110,7 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
                     max_position_embeddings,
                 )
                 self.model = self.lora_manager.create_lora_manager(self.model)
-            time_after_load = time.perf_counter()
+        time_after_load = time.perf_counter()
 
         self.model_memory_usage = m.consumed_memory
         logger.info("Model loading took %.4f GiB and %.6f seconds",
