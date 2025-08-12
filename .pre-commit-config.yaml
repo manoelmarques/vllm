@@ -53,6 +53,16 @@ repos:
       files: ^requirements/test\.(in|txt)$
 - repo: local
   hooks:
+  - id: generate-model-info-dict
+    name: Generates python file with dict of _ModelInfo objects
+    language: python
+    types: [python]
+    pass_filenames: false
+    entry: python tools/generate_model_info_dict.py --local
+    additional_dependencies: [torch, cachetools, cbor2, cloudpickle, numpy, psutil, setproctitle,
+                              pyyaml, pyzmq, packaging, transformers, msgspec, pydantic, blake3, pillow,
+                              pybase64, compressed-tensors, gguf, einops, timm, mistral_common, torchvision, aiohttp]
+    files: ^vllm/model_executor/models/.*\.py$
   - id: format-torch-nightly-test
     name: reformat nightly_torch_test.txt to be in sync with test.in
     language: python

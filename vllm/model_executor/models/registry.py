@@ -389,6 +389,19 @@ class _LazyRegisteredModel(_BaseRegisteredModel):
 
     # Performed in another process to avoid initializing CUDA
     def inspect_model_cls(self) -> _ModelInfo:
+        try:
+            from ._model_info import _MODEL_INFO_DICT
+        except Exception:
+            _MODEL_INFO_DICT = {}
+            logger.exception("_MODEL_INFO_DICT import failed.")
+
+        model_info = _MODEL_INFO_DICT.get(self.class_name)
+        if model_info is not None:
+            logger.info("Using preloaded model info for class %s",
+                        self.class_name)
+            return model_info
+
+        logger.info("Loading model info for class %s", self.class_name)
         return _run_in_subprocess(
             lambda: _ModelInfo.from_model_cls(self.load_model_cls()))
 
